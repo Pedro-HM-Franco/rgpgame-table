@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
+import {
+  getCurrentSession,
+  loadPlayerAccount,
+  observeAuth,
+  rpgCloudEnabled,
+  savePlayerAccount,
+  signInPlayer,
+  signOutPlayer,
+  signUpPlayer
+} from "./lib/rpgCloud";
 
 const STORAGE_KEY = "rpg-fichario-v1";
 const SESSION_KEY = "rpg-fichario-session";
+const CLOUD_CACHE_PREFIX = "rpg-fichario-cloud-";
 
 const emptyCharacter = {
   name: "",
@@ -72,6 +83,39 @@ function saveVault(vault) {
 
 function passwordHash(value) {
   return btoa(unescape(encodeURIComponent(value)));
+}
+
+function createAccount(name, id = makeId("account"), email = "") {
+  return {
+    id,
+    name,
+    email,
+    profile: {
+      displayName: name,
+      photo: "",
+      title: "Jogador da mesa",
+      favoriteSystem: "",
+      favoriteRole: "",
+      contact: "",
+      availability: "",
+      campaign: "",
+      bio: ""
+    },
+    rolls: [],
+    master: {
+      campaignName: "Campanha principal",
+      nextSession: "",
+      sessionStatus: "Preparando aventura",
+      npcs: [],
+      monsters: [],
+      secrets: [],
+      combatants: [],
+      turnIndex: 0,
+      journal: []
+    },
+    characters: [],
+    createdAt: new Date().toISOString()
+  };
 }
 
 function characterSummary(character) {
@@ -148,15 +192,30 @@ function LoadingScreen() {
   );
 }
 
-function AuthScreen({ vault, onLogin, onRegister }) {
+function AuthScreen({ cloudEnabled, vault, onLogin, onRegister, onCloudAuth, cloudMessage }) {
   const [mode, setMode] = useState("login");
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
     const cleanName = name.trim();
+
+    if (cloudEnabled) {
+      const cleanEmail = email.trim().toLowerCase();
+      if (mode === "register" && cleanName.length < 2) return setMessage("Use um nome com pelo menos 2 letras.");
+      if (!cleanEmail.includes("@")) return setMessage("Digite um e-mail valido.");
+      if (password.length < 6) return setMessage("Use uma senha com pelo menos 6 caracteres.");
+      setSubmitting(true);
+      const result = await onCloudAuth(mode, { name: cleanName, email: cleanEmail, password });
+      setSubmitting(false);
+      setMessage(result.message ?? "");
+      return;
+    }
+
     if (cleanName.length < 2) return setMessage("Use um nome com pelo menos 2 letras.");
     if (password.length < 4) return setMessage("Use uma senha com pelo menos 4 caracteres.");
 
@@ -192,16 +251,24 @@ function AuthScreen({ vault, onLogin, onRegister }) {
         </div>
 
         <form className="auth-form" onSubmit={submit}>
-          <label>
-            Nome
-            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex: Pedro" autoComplete="username" />
-          </label>
+          {!cloudEnabled || mode === "register" ? (
+            <label>
+              Nome
+              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex: Pedro" autoComplete="name" />
+            </label>
+          ) : null}
+          {cloudEnabled ? (
+            <label>
+              E-mail
+              <input value={email} onChange={(event) => setEmail(event.target.value)} placeholder="voce@email.com" type="email" autoComplete="email" />
+            </label>
+          ) : null}
           <label>
             Senha
             <input value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Sua senha" type="password" autoComplete={mode === "login" ? "current-password" : "new-password"} />
           </label>
-          {message ? <p className="form-message">{message}</p> : null}
-          <button type="submit">{mode === "login" ? "Entrar" : "Criar conta"}</button>
+          {message || cloudMessage ? <p className="form-message">{message || cloudMessage}</p> : null}
+          <button type="submit" disabled={submitting}>{submitting ? "Conectando..." : mode === "login" ? "Entrar" : "Criar conta"}</button>
         </form>
       </motion.section>
     </main>
@@ -1231,11 +1298,63 @@ export default function App() {
   const [booting, setBooting] = useState(true);
   const [vault, setVault] = useState(loadVault);
   const [activeAccountId, setActiveAccountId] = useState(() => sessionStorage.getItem(SESSION_KEY));
-  const activeAccount = vault.accounts.find((account) => account.id === activeAccountId);
+  const [cloudSession, setCloudSession] = useState(null);
+  const [cloudAccount, setCloudAccount] = useState(null);
+  const [cloudMessage, setCloudMessage] = useState("");
+  const saveTimer = useRef(null);
+  const activeAccount = rpgCloudEnabled
+    ? cloudAccount
+    : vault.accounts.find((account) => account.id === activeAccountId);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setBooting(false), 420);
-    return () => window.clearTimeout(timer);
+    if (!rpgCloudEnabled) {
+      const timer = window.setTimeout(() => setBooting(false), 420);
+      return () => window.clearTimeout(timer);
+    }
+
+    let mounted = true;
+
+    async function hydrate(session) {
+      if (!mounted) return;
+      setCloudSession(session);
+      if (!session?.user) {
+        setCloudAccount(null);
+        setBooting(false);
+        return;
+      }
+
+      setBooting(true);
+      try {
+        const user = session.user;
+        const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Jogador";
+        const localMatch = loadVault().accounts.find((account) => account.name.toLowerCase() === displayName.toLowerCase());
+        const account = await loadPlayerAccount(user, () => localMatch
+          ? { ...localMatch, id: user.id, email: user.email, password: undefined }
+          : createAccount(displayName, user.id, user.email));
+        if (!mounted) return;
+        setCloudAccount(account);
+        localStorage.setItem(`${CLOUD_CACHE_PREFIX}${user.id}`, JSON.stringify(account));
+        setCloudMessage("");
+      } catch {
+        const cached = localStorage.getItem(`${CLOUD_CACHE_PREFIX}${session.user.id}`);
+        if (cached) setCloudAccount(JSON.parse(cached));
+        setCloudMessage("Nao foi possivel sincronizar agora. Seus dados locais continuam disponiveis.");
+      } finally {
+        if (mounted) setBooting(false);
+      }
+    }
+
+    getCurrentSession().then(hydrate).catch(() => {
+      setCloudMessage("Nao foi possivel conectar ao Supabase.");
+      setBooting(false);
+    });
+    const { data: { subscription } } = observeAuth(hydrate);
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      window.clearTimeout(saveTimer.current);
+    };
   }, []);
 
   function commit(nextVault) {
@@ -1244,36 +1363,7 @@ export default function App() {
   }
 
   function register(name, password) {
-    const account = {
-      id: makeId("account"),
-      name,
-      password: passwordHash(password),
-      profile: {
-        displayName: name,
-        photo: "",
-        title: "Jogador da mesa",
-        favoriteSystem: "",
-        favoriteRole: "",
-        contact: "",
-        availability: "",
-        campaign: "",
-        bio: ""
-      },
-      rolls: [],
-      master: {
-        campaignName: "Campanha principal",
-        nextSession: "",
-        sessionStatus: "Preparando aventura",
-        npcs: [],
-        monsters: [],
-        secrets: [],
-        combatants: [],
-        turnIndex: 0,
-        journal: []
-      },
-      characters: [],
-      createdAt: new Date().toISOString()
-    };
+    const account = { ...createAccount(name), password: passwordHash(password) };
     commit({ accounts: [account, ...vault.accounts] });
     sessionStorage.setItem(SESSION_KEY, account.id);
     setActiveAccountId(account.id);
@@ -1284,18 +1374,68 @@ export default function App() {
     setActiveAccountId(accountId);
   }
 
-  function logout() {
+  async function logout() {
+    if (rpgCloudEnabled) {
+      try {
+        await signOutPlayer();
+      } catch {
+        setCloudMessage("Nao foi possivel encerrar a sessao agora.");
+      }
+      return;
+    }
     sessionStorage.removeItem(SESSION_KEY);
     setActiveAccountId(null);
   }
 
   function updateAccount(nextAccount) {
+    if (rpgCloudEnabled && cloudSession?.user) {
+      setCloudAccount(nextAccount);
+      localStorage.setItem(`${CLOUD_CACHE_PREFIX}${cloudSession.user.id}`, JSON.stringify(nextAccount));
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = window.setTimeout(() => {
+        savePlayerAccount(nextAccount, cloudSession.user.id).catch(() => {
+          setCloudMessage("Alteracoes salvas neste aparelho; sincronizacao pendente.");
+        });
+      }, 450);
+      return;
+    }
     commit({
       accounts: vault.accounts.map((account) => account.id === nextAccount.id ? nextAccount : account)
     });
   }
 
+  async function authenticateWithCloud(mode, credentials) {
+    try {
+      setCloudMessage("");
+      if (mode === "login") {
+        await signInPlayer(credentials);
+        return { message: "" };
+      }
+
+      const data = await signUpPlayer(credentials);
+      return data.session
+        ? { message: "Conta criada. Bem-vindo a mesa!" }
+        : { message: "Conta criada. Confira seu e-mail para confirmar o acesso." };
+    } catch (error) {
+      const messages = {
+        "Invalid login credentials": "E-mail ou senha nao conferem.",
+        "User already registered": "Este e-mail ja esta cadastrado.",
+        "Email not confirmed": "Confirme seu e-mail antes de entrar."
+      };
+      return { message: messages[error.message] || "Nao foi possivel entrar. Tente novamente." };
+    }
+  }
+
   if (booting) return <LoadingScreen />;
-  if (!activeAccount) return <AuthScreen vault={vault} onLogin={login} onRegister={register} />;
+  if (!activeAccount) return (
+    <AuthScreen
+      cloudEnabled={rpgCloudEnabled}
+      vault={vault}
+      onLogin={login}
+      onRegister={register}
+      onCloudAuth={authenticateWithCloud}
+      cloudMessage={cloudMessage}
+    />
+  );
   return <Dashboard account={activeAccount} onLogout={logout} onUpdateAccount={updateAccount} />;
 }
