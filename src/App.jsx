@@ -1302,6 +1302,7 @@ export default function App() {
   const [cloudAccount, setCloudAccount] = useState(null);
   const [cloudMessage, setCloudMessage] = useState("");
   const saveTimer = useRef(null);
+  const hydrationRun = useRef(0);
   const activeAccount = rpgCloudEnabled
     ? cloudAccount
     : vault.accounts.find((account) => account.id === activeAccountId);
@@ -1316,6 +1317,7 @@ export default function App() {
 
     async function hydrate(session) {
       if (!mounted) return;
+      const run = ++hydrationRun.current;
       setCloudSession(session);
       if (!session?.user) {
         setCloudAccount(null);
@@ -1323,7 +1325,22 @@ export default function App() {
         return;
       }
 
-      setBooting(true);
+      const cacheKey = `${CLOUD_CACHE_PREFIX}${session.user.id}`;
+      let cachedAccount = null;
+      try {
+        const cached = localStorage.getItem(cacheKey);
+        if (cached) {
+          cachedAccount = { ...JSON.parse(cached), id: session.user.id, email: session.user.email };
+          setCloudAccount(cachedAccount);
+          setBooting(false);
+        } else {
+          setBooting(true);
+        }
+      } catch {
+        localStorage.removeItem(cacheKey);
+        setBooting(true);
+      }
+
       try {
         const user = session.user;
         const displayName = user.user_metadata?.display_name || user.email?.split("@")[0] || "Jogador";
@@ -1331,16 +1348,17 @@ export default function App() {
         const account = await loadPlayerAccount(user, () => localMatch
           ? { ...localMatch, id: user.id, email: user.email, password: undefined }
           : createAccount(displayName, user.id, user.email));
-        if (!mounted) return;
+        if (!mounted || run !== hydrationRun.current) return;
         setCloudAccount(account);
-        localStorage.setItem(`${CLOUD_CACHE_PREFIX}${user.id}`, JSON.stringify(account));
+        localStorage.setItem(cacheKey, JSON.stringify(account));
         setCloudMessage("");
       } catch {
-        const cached = localStorage.getItem(`${CLOUD_CACHE_PREFIX}${session.user.id}`);
-        if (cached) setCloudAccount(JSON.parse(cached));
-        setCloudMessage("Nao foi possivel sincronizar agora. Seus dados locais continuam disponiveis.");
+        if (!mounted || run !== hydrationRun.current) return;
+        setCloudMessage(cachedAccount
+          ? "Nao foi possivel sincronizar agora. Seus dados locais continuam disponiveis."
+          : "A conexao demorou demais. Tente entrar novamente.");
       } finally {
-        if (mounted) setBooting(false);
+        if (mounted && run === hydrationRun.current) setBooting(false);
       }
     }
 
