@@ -1226,6 +1226,95 @@ label {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.level-progress-card {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid rgba(227,189,106,.28);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(143,90,42,.2), rgba(255,255,255,.025));
+}
+
+.level-badge {
+  display: grid;
+  place-items: center;
+  min-height: 100px;
+  border-right: 1px solid var(--line);
+  color: var(--gold);
+  text-transform: uppercase;
+}
+
+.level-badge span {
+  color: var(--muted);
+  font-size: .7rem;
+  font-weight: 900;
+}
+
+.level-badge strong {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.level-progress-main,
+.level-progress-heading {
+  min-width: 0;
+}
+
+.level-progress-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.level-progress-heading strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 1rem;
+}
+
+.level-progress-heading > span {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.experience-track {
+  height: 12px;
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid rgba(227,189,106,.24);
+  border-radius: 6px;
+  background: rgba(0,0,0,.34);
+}
+
+.experience-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8f5a2a, #e3bd6a);
+  transition: width .35s ease;
+}
+
+.experience-actions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, auto));
+  gap: 8px;
+  justify-content: start;
+}
+
+.experience-actions button {
+  min-height: 42px;
+  padding: 9px 12px;
+}
+
+.experience-actions .level-up-button {
+  border-color: rgba(227,189,106,.45);
+}
+
 .stat-row {
   grid-template-columns: repeat(6, minmax(0, 1fr));
   padding: 14px;
@@ -1667,6 +1756,34 @@ label {
   .attributes,
   .notes-grid {
     grid-template-columns: 1fr;
+  }
+
+  .level-progress-card {
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .level-badge {
+    min-height: 132px;
+  }
+
+  .level-badge strong {
+    font-size: 2.35rem;
+  }
+
+  .level-progress-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .experience-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .experience-actions .level-up-button {
+    grid-column: 1 / -1;
   }
 
   .table-scene {

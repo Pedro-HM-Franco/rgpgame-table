@@ -21,6 +21,7 @@ const emptyCharacter = {
   ancestry: "",
   className: "",
   level: 1,
+  experience: 0,
   playerName: "",
   background: "",
   alignment: "",
@@ -120,6 +121,10 @@ function createAccount(name, id = makeId("account"), email = "") {
 
 function characterSummary(character) {
   return [character.ancestry, character.className, character.level ? `nivel ${character.level}` : ""].filter(Boolean).join(" / ");
+}
+
+function experienceGoalForLevel(level) {
+  return Math.max(1, Number(level) || 1) * 100;
 }
 
 function profileFor(account) {
@@ -879,6 +884,35 @@ function CharacterEditor({ character, onChange, onSave, onDiscard, hasChanges, s
     update(field, next);
   }
 
+  function setLevel(value) {
+    const nextLevel = Math.min(30, Math.max(1, Number(value) || 1));
+    onChange({
+      ...character,
+      level: nextLevel,
+      experience: nextLevel === 30
+        ? 0
+        : Math.min(Math.max(0, Number(character.experience) || 0), experienceGoalForLevel(nextLevel) - 1),
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  function addExperience(amount) {
+    let nextLevel = Math.min(30, Math.max(1, Number(character.level) || 1));
+    let nextExperience = Math.max(0, Number(character.experience) || 0) + amount;
+
+    while (nextLevel < 30 && nextExperience >= experienceGoalForLevel(nextLevel)) {
+      nextExperience -= experienceGoalForLevel(nextLevel);
+      nextLevel += 1;
+    }
+
+    onChange({
+      ...character,
+      level: nextLevel,
+      experience: nextLevel === 30 ? 0 : Math.max(0, nextExperience),
+      updatedAt: new Date().toISOString()
+    });
+  }
+
   function addInventoryItem() {
     update("inventoryItems", [
       ...(character.inventoryItems ?? []),
@@ -911,6 +945,10 @@ function CharacterEditor({ character, onChange, onSave, onDiscard, hasChanges, s
 
   const inventoryItems = character.inventoryItems ?? [];
   const spellCards = character.spellCards ?? [];
+  const currentLevel = Math.min(30, Math.max(1, Number(character.level) || 1));
+  const currentExperience = Math.max(0, Number(character.experience) || 0);
+  const experienceGoal = experienceGoalForLevel(currentLevel);
+  const experiencePercent = currentLevel === 30 ? 100 : Math.min(100, (currentExperience / experienceGoal) * 100);
   const filteredItems = inventoryItems.filter((item) =>
     `${item.name} ${item.category} ${item.notes}`.toLowerCase().includes(inventorySearch.toLowerCase())
   );
@@ -976,12 +1014,38 @@ function CharacterEditor({ character, onChange, onSave, onDiscard, hasChanges, s
             <TextField label="Sistema" value={character.system} onChange={(value) => update("system", value)} placeholder="D&D, Tormenta, Ordem..." />
             <TextField label="Raca" value={character.ancestry} onChange={(value) => update("ancestry", value)} placeholder="Humano, elfo..." />
             <TextField label="Classe" value={character.className} onChange={(value) => update("className", value)} placeholder="Guerreiro, mago..." />
-            <TextField label="Nivel" type="number" min="1" max="30" value={character.level} onChange={(value) => update("level", value)} />
+            <TextField label="Nivel" type="number" min="1" max="30" value={currentLevel} onChange={setLevel} />
             <TextField label="Jogador" value={character.playerName} onChange={(value) => update("playerName", value)} placeholder="Quem joga" />
             <TextField label="Historico" value={character.background} onChange={(value) => update("background", value)} placeholder="Soldado, academico..." />
             <TextField label="Conceito" value={character.alignment} onChange={(value) => update("alignment", value)} placeholder="Leal bom, anti-heroi..." />
             <TextField label="Avatar curto" value={character.portrait} onChange={(value) => update("portrait", value.slice(0, 2).toUpperCase())} placeholder="AB" />
           </div>
+
+          <section className="level-progress-card" aria-label="Progressao do personagem">
+            <div className="level-badge">
+              <span>Nivel</span>
+              <strong>{currentLevel}</strong>
+            </div>
+            <div className="level-progress-main">
+              <div className="level-progress-heading">
+                <div>
+                  <p className="eyebrow">Experiencia</p>
+                  <strong>{currentLevel === 30 ? "Nivel maximo alcancado" : `${currentExperience} / ${experienceGoal} XP`}</strong>
+                </div>
+                {currentLevel < 30 ? <span>Proximo: nivel {currentLevel + 1}</span> : null}
+              </div>
+              <div className="experience-track" role="progressbar" aria-label="Experiencia para o proximo nivel" aria-valuemin="0" aria-valuemax={experienceGoal} aria-valuenow={currentLevel === 30 ? experienceGoal : currentExperience}>
+                <span style={{ width: `${experiencePercent}%` }} />
+              </div>
+              <div className="experience-actions">
+                <button type="button" className="subtle-button" onClick={() => addExperience(-10)} disabled={currentLevel === 30 || currentExperience === 0}>-10 XP</button>
+                <button type="button" onClick={() => addExperience(10)} disabled={currentLevel === 30}>+10 XP</button>
+                <button type="button" onClick={() => addExperience(50)} disabled={currentLevel === 30}>+50 XP</button>
+                <button type="button" onClick={() => addExperience(100)} disabled={currentLevel === 30}>+100 XP</button>
+                <button type="button" className="level-up-button" onClick={() => addExperience(experienceGoal - currentExperience)} disabled={currentLevel === 30}>Subir nivel</button>
+              </div>
+            </div>
+          </section>
 
           <div className="form-grid notes-grid">
             <TextArea label="Historia" value={character.story} onChange={(value) => update("story", value)} placeholder="Origem, objetivos, aliados, traumas..." />
